@@ -31,11 +31,9 @@ jobs:
         echo "After replacement:"
         grep "YOUR_FMP_API_KEY" index.html || echo "Placeholder replaced"
     - name: Deploy to GitHub Pages
-      uses: JamesIves/github-pages-deploy-action@4.6.4
+      uses: peaceiris/actions-gh-pages@v4
       with:
-        branch: gh-pages
-        folder: .
-        token: ${{ secrets.ACCESS_TOKEN }}
-        clean: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+        github_token: ${{ secrets.ACCESS_TOKEN }}
+        publish_dir: .
+        publish_branch: gh-pages
+        force_orphan: true
