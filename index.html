@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Securities Portfolio Credit Exposure Demo with FMP API</title>
+  <!-- Tailwind CSS CDN -->
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <!-- Chart.js CDN for visualization -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+  <style>
+    body { background-color: #f9fafb; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+    .isin-entry { display: flex; gap: 1rem; align-items: center; margin-bottom: 1rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <h1 class="text-3xl font-bold text-gray-800 mb-6">Securities Portfolio Credit Exposure Demo with FMP API</h1>
+
+    <!-- Portfolio Input Section -->
+    <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+      <h2 class="text-xl font-semibold text-gray-700 mb-4">Build Your Portfolio (Up to 10 ISINs)</h2>
+      <p class="text-sm text-gray-500 mb-4">Enter ISINs (mapped to tickers) and weights or face amounts.</p>
+      <div id="isinContainer">
+        <!-- Initial ISIN Entry -->
+        <div class="isin-entry">
+          <input type="text" class="border rounded p-2 w-1/4" placeholder="Enter ISIN (e.g., US0378331005)" name="isin">
+          <select class="border rounded p-2" name="inputType">
+            <option value="weight">Weight (%)</option>
+            <option value="famt">Face Amount (FAMT)</option>
+          </select>
+          <input type="number" class="border rounded p-2 w-1/4" placeholder="Enter Value" name="value" min="0">
+          <button class="text-red-600 hover:text-red-800 remove-btn hidden">Remove</button>
+        </div>
+      </div>
+      <button id="addIsin" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 mt-4">Add Another ISIN</button>
+      <button id="calculateExposure" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 mt-4 ml-4">Calculate Exposure</button>
+    </div>
+
+    <!-- Security Metrics Table -->
+    <div id="metricsTable" class="bg-white p-6 rounded-lg shadow-md mb-6 hidden">
+      <h2 class="text-xl font-semibold text-gray-700 mb-4">Security Metrics</h2>
+      <table class="w-full text-left border-collapse">
+        <thead>
+          <tr class="bg-gray-100">
+            <th class="p-2 border">Ticker</th>
+            <th class="p-2 border">Price ($)</th>
+            <th class="p-2 border">Beta</th>
+            <th class="p-2 border">P/E Ratio</th>
+            <th class="p-2 border">Debt-to-Equity</th>
+            <th class="p-2 border">Risk Score (%)</th>
+          </tr>
+        </thead>
+        <tbody id="metricsBody"></tbody>
+      </table>
+    </div>
+
+    <!-- Exposure Results -->
+    <div id="results" class="bg-white p-6 rounded-lg shadow-md mb-6 hidden">
+      <h2 class="text-xl font-semibold text-gray-700 mb-4">Credit Exposure Analysis</h2>
+      <div class="mb-4">
+        <p class="text-gray-600">Total Credit Exposure (Today):</p>
+        <p id="todayExposure" class="text-2xl font-bold text-blue-600">$0M</p>
+      </div>
+      <table class="w-full text-left border-collapse mb-4">
+        <thead>
+          <tr class="bg-gray-100">
+            <th class="p-2 border">Period</th>
+            <th class="p-2 border">Exposure ($M)</th>
+            <th class="p-2 border">Change vs. Today</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="p-2 border">Yesterday</td>
+            <td id="yesterdayExposure" class="p-2 border">$0M</td>
+            <td id="yesterdayChange" class="p-2 border">0%</td>
+          </tr>
+          <tr>
+            <td class="p-2 border">T-7 Days</td>
+            <td id="t7Exposure" class="p-2 border">$0M</td>
+            <td id="t7Change" class="p-2 border">0%</td>
+          </tr>
+        </tbody>
+      </table>
+      <!-- Exposure Chart -->
+      <canvas id="exposureChart" height="100" class="mt-4"></canvas>
+    </div>
+  </div>
+
+  <script>
+    // ISIN to Ticker Mapping (Simplified for Demo)
+    const isinToTicker = {
+      'US0378331005': 'AAPL', // Apple Inc.
+      'US5949181045': 'MSFT', // Microsoft Corp.
+      'GB0007980591': 'BP',   // BP PLC
+      'DE0008404005': 'ALV',  // Allianz SE
+      'FR0000121014': 'MC'    // LVMH
+    };
+
+    // Placeholder API Key (Replace with GitHub Actions injection in production)
+    const FMP_API_KEY = 'YOUR_FMP_API_KEY'; // This will be injected via GitHub Actions
+
+    // Manage ISIN Entries
+    const isinContainer = document.getElementById('isinContainer');
+    const addIsinBtn = document.getElementById('addIsin');
+    let isinCount = 1;
+
+    addIsinBtn.addEventListener('click', () => {
+      if (isinCount < 10) {
+        isinCount++;
+        const newEntry = document.createElement('div');
+        newEntry.classList.add('isin-entry');
+        newEntry.innerHTML = `
+          <input type="text" class="border rounded p-2 w-1/4" placeholder="Enter ISIN (e.g., US0378331005)" name="isin">
+          <select class="border rounded p-2" name="inputType">
+            <option value="weight">Weight (%)</option>
+            <option value="famt">Face Amount (FAMT)</option>
+          </select>
+          <input type="number" class="border rounded p-2 w-1/4" placeholder="Enter Value" name="value" min="0">
+          <button class="text-red-600 hover:text-red-800 remove-btn">Remove</button>
+        `;
+        isinContainer.appendChild(newEntry);
+        updateRemoveButtons();
+      }
+      if (isinCount === 10) addIsinBtn.disabled = true;
+    });
+
+    function updateRemoveButtons() {
+      const removeButtons = document.querySelectorAll('.remove-btn');
+      removeButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+          btn.parentElement.remove();
+          isinCount--;
+          addIsinBtn.disabled = false;
+        });
+        btn.classList.toggle('hidden', isinCount === 1);
+      });
+    }
+
+    // Fetch Data from FMP API
+    async function fetchSecurityData(ticker) {
+      try {
+        // Fetch Company Profile (for Beta)
+        const profileResponse = await fetch(`https://financialmodelingprep.com/api/v3/profile/${ticker}?apikey=${FMP_API_KEY}`);
+        const profileData = await profileResponse.json();
+        const beta = profileData[0]?.beta || 1;
+
+        // Fetch Key Metrics (for P/E Ratio, Debt-to-Equity)
+        const metricsResponse = await fetch(`https://financialmodelingprep.com/api/v3/key-metrics/${ticker}?limit=1&apikey=${FMP_API_KEY}`);
+        const metricsData = await metricsResponse.json();
+        const peRatio = metricsData[0]?.peRatio || 0;
+        const debtToEquity = metricsData[0]?.debtToEquity || 0;
+
+        // Fetch Real-Time Quote (for Price)
+        const quoteResponse = await fetch(`https://financialmodelingprep.com/api/v3/quote/${ticker}?apikey=${FMP_API_KEY}`);
+        const quoteData = await quoteResponse.json();
+        const price = quoteData[0]?.price || 0;
+
+        // Simulate Risk Score (Could be derived from FMP Rating API in a paid plan)
+        const riskScore = (beta * 5 + (debtToEquity > 1 ? 5 : 0) + (peRatio > 30 ? 3 : 0)).toFixed(2);
+
+        return { ticker, price, beta, peRatio, debtToEquity, riskScore };
+      } catch (error) {
+        console.error(`Error fetching data for ${ticker}:`, error);
+        return { ticker, price: 0, beta: 1, peRatio: 0, debtToEquity: 0, riskScore: 7 };
+      }
+    }
+
+    // Calculate Exposure and Update UI
+    const calculateExposureBtn = document.getElementById('calculateExposure');
+    let exposureChart;
+
+    calculateExposureBtn.addEventListener('click', async () => {
+      const entries = document.querySelectorAll('.isin-entry');
+      let totalExposure = 0;
+      let weights = [];
+      let totalWeight = 0;
+      let totalFamt = 0;
+      const securityData = [];
+
+      // Fetch Data for All Tickers
+      const tickers = [];
+      entries.forEach(entry => {
+        const isin = entry.querySelector('input[name="isin"]').value.trim().toUpperCase();
+        const ticker = isinToTicker[isin] || null;
+        if (ticker && !tickers.includes(ticker)) tickers.push(ticker);
+      });
+
+      for (const ticker of tickers) {
+        const data = await fetchSecurityData(ticker);
+        securityData.push(data);
+      }
+
+      // Populate Security Metrics Table
+      const metricsBody = document.getElementById('metricsBody');
+      metricsBody.innerHTML = '';
+      securityData.forEach(data => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td class="p-2 border">${data.ticker}</td>
+          <td class="p-2 border">$${data.price.toFixed(2)}</td>
+          <td class="p-2 border">${data.beta.toFixed(2)}</td>
+          <td class="p-2 border">${data.peRatio.toFixed(2)}</td>
+          <td class="p-2 border">${data.debtToEquity.toFixed(2)}</td>
+          <td class="p-2 border">${data.riskScore}%</td>
+        `;
+        metricsBody.appendChild(row);
+      });
+      document.getElementById('metricsTable').classList.remove('hidden');
+
+      // Calculate Exposure
+      entries.forEach(entry => {
+        const isin = entry.querySelector('input[name="isin"]').value.trim().toUpperCase();
+        const inputType = entry.querySelector('select[name="inputType"]').value;
+        const value = parseFloat(entry.querySelector('input[name="value"]').value) || 0;
+
+        if (isin && value > 0) {
+          const ticker = isinToTicker[isin] || null;
+          const data = securityData.find(d => d.ticker === ticker);
+          const riskScore = data ? data.riskScore : 7;
+
+          if (inputType === 'weight') {
+            weights.push({ riskScore, weight: value });
+            totalWeight += value;
+          } else {
+            totalFamt += value;
+            weights.push({ riskScore, famt: value });
+          }
+        }
+      });
+
+      // Normalize Weights if Using FAMT
+      if (totalFamt > 0) {
+        weights = weights.map(w => ({
+          riskScore: w.riskScore,
+          weight: (w.famt / totalFamt) * 100
+        }));
+        totalWeight = 100;
+      }
+
+      // Validate Total Weight
+      if (totalWeight === 0) {
+        alert('Please enter at least one valid ISIN with a weight or FAMT.');
+        return;
+      }
+      if (totalWeight !== 100 && totalFamt === 0) {
+        alert('Total weight must equal 100%. Current total: ' + totalWeight + '%');
+        return;
+      }
+
+      // Calculate Exposure (Weighted Sum of Risk Scores, Scaled to $M)
+      weights.forEach(w => {
+        totalExposure += (w.riskScore * (w.weight / 100));
+      });
+      totalExposure = (totalExposure * 10).toFixed(2); // Scale to $M for demo
+
+      // Simulated Historical Data
+      const yesterdayExposure = (totalExposure * 0.98).toFixed(2); // 2% decrease
+      const t7Exposure = (totalExposure * 0.95).toFixed(2);       // 5% decrease
+
+      // Update Results
+      document.getElementById('todayExposure').textContent = `$${totalExposure}M`;
+      document.getElementById('yesterdayExposure').textContent = `$${yesterdayExposure}M`;
+      document.getElementById('yesterdayChange').textContent = `${(((yesterdayExposure - totalExposure) / totalExposure) * 100).toFixed(1)}%`;
+      document.getElementById('t7Exposure').textContent = `$${t7Exposure}M`;
+      document.getElementById('t7Change').textContent = `${(((t7Exposure - totalExposure) / totalExposure) * 100).toFixed(1)}%`;
+
+      // Show Results
+      document.getElementById('results').classList.remove('hidden');
+
+      // Update Chart
+      if (exposureChart) exposureChart.destroy();
+      const ctx = document.getElementById('exposureChart').getContext('2d');
+      exposureChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: ['T-7 Days', 'Yesterday', 'Today'],
+          datasets: [{
+            label: 'Credit Exposure ($M)',
+            data: [t7Exposure, yesterdayExposure, totalExposure],
+            backgroundColor: ['rgba(255, 99, 132, 0.6)', 'rgba(54, 162, 235, 0.6)', 'rgba(75, 192, 192, 0.6)'],
+            borderColor: ['rgba(255, 99, 132, 1)', 'rgba(54, 162, 235, 1)', 'rgba(75, 192, 192, 1)'],
+            borderWidth: 1
+          }]
+        },
+        options: {
+          scales: {
+            y: {
+              beginAtZero: true,
+              title: { display: true, text: 'Exposure ($M)' }
+            }
+          }
+        }
+      });
+    });
+  </script>
+</body>
+</html>
