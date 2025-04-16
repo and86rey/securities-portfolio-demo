@@ -17,6 +17,12 @@ jobs:
           echo "Error: FMP_API_KEY is not set in GitHub Secrets."
           exit 1
         fi
+    - name: Verify Access Token
+      run: |
+        if [ -z "${{ secrets.ACCESS_TOKEN }}" ]; then
+          echo "Error: ACCESS_TOKEN is not set in GitHub Secrets."
+          exit 1
+        fi
     - name: Replace API Key
       run: |
         echo "Before replacement:"
